@@ -198,12 +198,27 @@ export default function TerminalPage() {
                   </span>
                 </>
               )}
-              {!activeTicker && (
-                <span className="text-xs text-[#94A3B8]/60 font-mono">Search a ticker to begin</span>
-              )}
             </div>
 
             <div className="flex items-center gap-3">
+              {/* Ticker search */}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const input = (e.target as HTMLFormElement).querySelector("input");
+                  if (input?.value.trim()) {
+                    const val = input.value.trim().toUpperCase();
+                    fetchTicker(TICKER_MAP[val] || val);
+                  }
+                }}
+                className="flex items-center"
+              >
+                <input
+                  placeholder="Ticker..."
+                  className="w-28 bg-white/[0.04] border border-white/[0.1] rounded-md px-2.5 py-1 text-xs font-mono text-[#E5E7EB] placeholder:text-[#94A3B8]/40 outline-none focus:border-[#3B82F6]/40 transition-colors"
+                />
+              </form>
+
               {/* Timeframes */}
               <div className="flex items-center gap-0.5 bg-white/[0.03] rounded-md border border-white/[0.06] p-0.5">
                 {TIMEFRAMES.map((tf) => (

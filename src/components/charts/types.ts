@@ -21,7 +21,7 @@ export interface SentimentPoint {
   confidence: number;
 }
 
-export interface MA Point {
+export interface MAPoint {
   date: string;
   value: number;
 }
