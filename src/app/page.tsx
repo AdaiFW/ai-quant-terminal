@@ -1,251 +1,254 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
-import { LineChart, TrendingUp } from "lucide-react";
-import { StockSearch } from "@/components/stock/stock-search";
-import { StockCard } from "@/components/stock/stock-card";
-import { AIAnalysisPanel } from "@/components/stock/ai-analysis-panel";
-import { CandlestickChart } from "@/components/stock/candlestick-chart";
+import { useCallback, useEffect, useRef } from "react";
+import { motion } from "framer-motion";
 import {
-  StockCardSkeleton,
-  AnalysisPanelSkeleton,
-} from "@/components/stock/stock-skeleton";
-import { ChartSkeleton } from "@/components/charts/chart-skeleton";
-import { ErrorMessage } from "@/components/ui/error-message";
-import type { StockQuote, CandlePoint } from "@/types/stock";
-import type { AIAnalysisOutput } from "@/types/ai-analysis";
+  createChart,
+  CandlestickSeries,
+  HistogramSeries,
+  LineSeries,
+  ColorType,
+} from "lightweight-charts";
+import { TickerBar } from "@/components/terminal/ticker-bar";
+import { WatchlistPanel } from "@/components/terminal/watchlist-panel";
+import { AIQuantPanel } from "@/components/terminal/ai-quant-panel";
+import { useTerminalStore } from "@/stores/terminal-store";
+import type { CandlePoint } from "@/types/stock";
 
-/* ── State ── */
+const TIMEFRAMES = ["1D", "1W", "1M", "3M", "1Y", "ALL"];
 
-type DashboardState =
-  | { phase: "idle" }
-  | { phase: "fetching_stock" }
-  | { phase: "stock_loaded"; stock: StockQuote }
-  | { phase: "analyzing"; stock: StockQuote }
-  | { phase: "analysis_loaded"; stock: StockQuote; analysis: AIAnalysisOutput; meta: AnalysisMeta }
-  | { phase: "stock_error"; error: string }
-  | { phase: "analysis_error"; stock: StockQuote; error: string };
+export default function TerminalPage() {
+  const chartRef = useRef<HTMLDivElement>(null);
+  const chartApiRef = useRef<ReturnType<typeof createChart> | null>(null);
+  const {
+    activeTicker, candles, aiData, watchlist, timeframe,
+    setActiveTicker, setCandles, setAIData, setLoading, setAnalyzing,
+    isLoading, isAnalyzing, tickerData, setTickerData, setTimeframe,
+  } = useTerminalStore();
 
-interface AnalysisMeta {
-  model: string;
-  tokensInput: number;
-  tokensOutput: number;
-  latencyMs: number;
-  attempts: number;
-}
-
-/* ── Page ── */
-
-export default function DashboardPage() {
-  const [state, setState] = useState<DashboardState>({ phase: "idle" });
-  const [candles, setCandles] = useState<CandlePoint[]>([]);
-  const [candlesLoading, setCandlesLoading] = useState(false);
-
-  const fetchStock = useCallback(async (ticker: string) => {
-    setState({ phase: "fetching_stock" });
-    setCandles([]);
-
+  // Fetch stock data
+  const fetchTicker = useCallback(async (symbol: string) => {
+    setLoading(true);
     try {
-      const res = await fetch(`/api/stocks/${ticker}`);
-      const json = await res.json();
+      const [quoteRes, candleRes] = await Promise.all([
+        fetch(`/api/stocks/${symbol}`),
+        fetch(`/api/stocks/${symbol}/candles`),
+      ]);
+      const quote = await quoteRes.json();
+      const candle = await candleRes.json();
+      if (quote.success) setTickerData(quote.data);
+      if (candle.success) setCandles(candle.data);
+    } catch { /* silent */ }
+    setLoading(false);
+  }, [setLoading, setTickerData, setCandles]);
 
-      if (!json.success) {
-        setState({
-          phase: "stock_error",
-          error: json.error?.message ?? "Failed to fetch stock data",
-        });
-        return;
-      }
-
-      setState({ phase: "stock_loaded", stock: json.data });
-
-      // Fetch candles in background
-      setCandlesLoading(true);
-      fetch(`/api/stocks/${ticker}/candles`)
-        .then((r) => r.json())
-        .then((d) => d.success && setCandles(d.data))
-        .catch(() => {})
-        .finally(() => setCandlesLoading(false));
-    } catch (err) {
-      setState({
-        phase: "stock_error",
-        error: err instanceof Error ? err.message : "Network error",
-      });
-    }
-  }, []);
-
+  // Fetch AI analysis
   const runAnalysis = useCallback(async () => {
-    if (state.phase !== "stock_loaded") return;
-    const stock = state.stock;
-
-    setState({ phase: "analyzing", stock });
-
+    if (!tickerData) return;
+    setAnalyzing(true);
     try {
       const res = await fetch("/api/ai/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ticker: stock.ticker,
+          ticker: tickerData.ticker,
           analysisType: "COMPREHENSIVE",
           timeframe: "DAILY",
           stockData: {
-            currentPrice: stock.currentPrice,
-            dailyChange: stock.dailyChange,
-            dailyChangePercent: stock.dailyChangePercent,
-            volume: stock.volume,
-            marketCap: stock.marketCap,
-            movingAverage50Day: stock.movingAverage50Day,
-            high: stock.high,
-            low: stock.low,
-            open: stock.open,
-            previousClose: stock.previousClose,
-            currency: stock.currency,
+            currentPrice: tickerData.currentPrice,
+            dailyChange: tickerData.dailyChange,
+            dailyChangePercent: tickerData.dailyChangePercent,
+            volume: tickerData.volume,
+            marketCap: tickerData.marketCap,
+            movingAverage50Day: tickerData.movingAverage50Day,
+            high: tickerData.high, low: tickerData.low,
+            open: tickerData.open, previousClose: tickerData.previousClose,
+            currency: tickerData.currency,
           },
         }),
       });
       const json = await res.json();
-
-      if (!json.success) {
-        setState({ phase: "analysis_error", stock, error: json.error?.message ?? "AI analysis failed" });
-        return;
+      if (json.success) {
+        const d = json.data as Record<string, unknown>;
+        setAIData({
+          trendSignal: mapSignal(d.sentiment as string, d.confidence as number),
+          confidence: d.confidence as number,
+          riskScore: d.risk_level === "High" ? 7.5 : d.risk_level === "Medium" ? 4.5 : 2,
+          support: tickerData.currentPrice * 0.97,
+          resistance: tickerData.currentPrice * 1.04,
+          momentum: tickerData.dailyChangePercent,
+          volumeStrength: tickerData.volume > 50_000_000 ? "High" : tickerData.volume > 10_000_000 ? "Medium" : "Low",
+          volatility: 2.3,
+          marketSentiment: d.sentiment as "Bullish" | "Neutral" | "Bearish",
+        });
       }
+    } catch { /* silent */ }
+    setAnalyzing(false);
+  }, [tickerData, setAnalyzing, setAIData]);
 
-      setState({ phase: "analysis_loaded", stock, analysis: json.data, meta: json.meta });
-    } catch (err) {
-      setState({ phase: "analysis_error", stock, error: err instanceof Error ? err.message : "Network error" });
+  useEffect(() => { if (activeTicker) fetchTicker(activeTicker); }, [activeTicker, fetchTicker]);
+
+  // TradingView chart
+  useEffect(() => {
+    if (!chartRef.current || candles.length === 0) return;
+    if (chartApiRef.current) { chartApiRef.current.remove(); chartApiRef.current = null; }
+
+    const chart = createChart(chartRef.current, {
+      layout: { background: { type: ColorType.Solid, color: "#0A0E17" }, textColor: "#94A3B8" },
+      grid: { vertLines: { color: "rgba(255,255,255,0.04)" }, horzLines: { color: "rgba(255,255,255,0.04)" } },
+      crosshair: { mode: 0, vertLine: { color: "rgba(255,255,255,0.1)", style: 2 }, horzLine: { color: "rgba(255,255,255,0.1)", style: 2 } },
+      rightPriceScale: { borderColor: "rgba(255,255,255,0.06)" },
+      timeScale: { borderColor: "rgba(255,255,255,0.06)" },
+      width: chartRef.current.clientWidth,
+      height: chartRef.current.clientHeight,
+    });
+
+    const candleSeries = chart.addSeries(CandlestickSeries, {
+      upColor: "#00C087", downColor: "#FF4D4F",
+      borderUpColor: "#00C087", borderDownColor: "#FF4D4F",
+      wickUpColor: "#00C087", wickDownColor: "#FF4D4F",
+    });
+    candleSeries.setData(candles.map((d: CandlePoint) => ({
+      time: d.date as string, open: d.open, high: d.high, low: d.low, close: d.close,
+    })));
+
+    // EMA 20
+    const ema20 = calcEMA(candles, 20);
+    if (ema20.length > 0) {
+      const emaSeries = chart.addSeries(LineSeries, { color: "#3B82F6", lineWidth: 1 });
+      emaSeries.setData(ema20.map((v, i) => ({ time: candles[i]!.date as string, value: v })));
     }
-  }, [state]);
 
-  const handleRetryStock = useCallback(() => {
-    if (state.phase !== "stock_error") return;
-    setState({ phase: "idle" });
-  }, [state]);
+    // Volume
+    const volSeries = chart.addSeries(HistogramSeries, {
+      color: "rgba(148,163,184,0.3)", priceFormat: { type: "volume" }, priceScaleId: "vol",
+    });
+    chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 }, visible: false });
+    volSeries.setData(candles.map((d: CandlePoint) => ({
+      time: d.date as string, value: d.volume,
+      color: d.close >= d.open ? "rgba(0,192,135,0.4)" : "rgba(255,77,79,0.4)",
+    })));
 
-  const handleRetryAnalysis = useCallback(() => {
-    if (state.phase !== "analysis_error") return;
-    setState({ phase: "stock_loaded", stock: state.stock });
-  }, [state]);
+    chart.timeScale().fitContent();
+    chartApiRef.current = chart;
 
-  const isStockLoaded =
-    state.phase === "stock_loaded" ||
-    state.phase === "analyzing" ||
-    state.phase === "analysis_loaded" ||
-    state.phase === "analysis_error";
+    const resize = () => { if (chartRef.current) chart.applyOptions({ width: chartRef.current.clientWidth }); };
+    window.addEventListener("resize", resize);
+    return () => { window.removeEventListener("resize", resize); chart.remove(); };
+  }, [candles]);
 
   return (
-    <div className="container py-8">
-      {/* Hero */}
-      <section className="mb-8">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10">
-                <TrendingUp className="h-4.5 w-4.5 text-primary" aria-hidden="true" />
-              </div>
-              <h1 className="text-2xl font-bold tracking-tight">Market Intelligence</h1>
+    <div className="flex flex-col h-screen bg-[#0A0E17] text-[#E5E7EB] overflow-hidden">
+      {/* Ticker bar */}
+      <TickerBar />
+
+      {/* Main grid */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left: Watchlist (narrow) */}
+        <aside className="w-[180px] shrink-0 border-r border-white/[0.06] overflow-hidden">
+          <WatchlistPanel />
+        </aside>
+
+        {/* Center: Chart + Toolbar */}
+        <main className="flex-1 flex flex-col overflow-hidden">
+          {/* Toolbar */}
+          <div className="flex items-center justify-between px-4 py-2 border-b border-white/[0.06] bg-[#0A0E17]">
+            <div className="flex items-center gap-3">
+              {activeTicker && tickerData && (
+                <>
+                  <span className="text-sm font-bold font-mono tracking-tight text-[#E5E7EB]">
+                    {activeTicker}
+                  </span>
+                  <span className="text-sm font-bold tabular-nums font-mono text-[#E5E7EB]">
+                    {tickerData.currency === "CNY" ? "¥" : "$"}{tickerData.currentPrice.toFixed(2)}
+                  </span>
+                  <span className={`text-xs font-mono tabular-nums ${tickerData.dailyChange >= 0 ? "text-[#00C087]" : "text-[#FF4D4F]"}`}>
+                    {tickerData.dailyChange >= 0 ? "+" : ""}{tickerData.dailyChangePercent.toFixed(2)}%
+                  </span>
+                </>
+              )}
+              {!activeTicker && (
+                <span className="text-xs text-[#94A3B8]/60 font-mono">Search a ticker to begin</span>
+              )}
             </div>
-            <p className="text-sm text-muted-foreground">
-              AI-powered stock analysis with real-time data
-            </p>
-          </div>
-          <StockSearch
-            onSelect={fetchStock}
-            isLoading={state.phase === "fetching_stock"}
-            disabled={state.phase === "analyzing"}
-          />
-        </div>
-      </section>
 
-      {/* Idle */}
-      {state.phase === "idle" && <EmptyState />}
+            <div className="flex items-center gap-3">
+              {/* Timeframes */}
+              <div className="flex items-center gap-0.5 bg-white/[0.03] rounded-md border border-white/[0.06] p-0.5">
+                {TIMEFRAMES.map((tf) => (
+                  <button
+                    key={tf}
+                    onClick={() => setTimeframe(tf)}
+                    className={`px-2.5 py-1 text-[10px] font-mono rounded transition-all ${
+                      timeframe === tf
+                        ? "bg-[#3B82F6]/20 text-[#3B82F6] font-semibold"
+                        : "text-[#94A3B8] hover:text-[#E5E7EB]"
+                    }`}
+                  >
+                    {tf}
+                  </button>
+                ))}
+              </div>
 
-      {/* Loading */}
-      {state.phase === "fetching_stock" && (
-        <div className="grid gap-6 lg:grid-cols-2">
-          <StockCardSkeleton />
-          <div className="hidden lg:block" />
-        </div>
-      )}
-
-      {/* Stock Error */}
-      {state.phase === "stock_error" && (
-        <div className="grid gap-6 lg:grid-cols-2">
-          <ErrorMessage title="Could not load stock data" message={state.error} retryable onRetry={handleRetryStock} />
-        </div>
-      )}
-
-      {/* Stock loaded → 左列: 股票卡片 + K线 | 右列: AI 分析 */}
-      {isStockLoaded && (
-        <div className="grid gap-6 lg:grid-cols-2">
-          {/* Left: Stock Card + K-line */}
-          <div className="space-y-4">
-            <StockCard data={state.stock} />
-
-            {/* K-line chart — always show when stock data available */}
-            {candlesLoading ? (
-              <ChartSkeleton height={360} />
-            ) : candles.length > 0 ? (
-              <CandlestickChart data={candles} height={360} />
-            ) : null}
-
-            {state.phase === "stock_loaded" && (
-              <button
-                onClick={runAnalysis}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:opacity-95 active:scale-[0.98]"
-              >
-                <LineChart className="h-4 w-4" />
-                Run AI Analysis
-              </button>
-            )}
+              {/* AI button */}
+              {activeTicker && !aiData && (
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={runAnalysis}
+                  disabled={isAnalyzing || !tickerData}
+                  className="flex items-center gap-1.5 rounded-md bg-[#3B82F6]/15 border border-[#3B82F6]/30 px-3 py-1.5 text-[11px] font-semibold text-[#3B82F6] font-mono hover:bg-[#3B82F6]/25 transition-all disabled:opacity-50"
+                >
+                  {isAnalyzing ? "Analyzing..." : "AI Analysis"}
+                </motion.button>
+              )}
+            </div>
           </div>
 
-          {/* Right: AI Analysis */}
-          <div>
-            {state.phase === "analyzing" && <AnalysisPanelSkeleton />}
-            {state.phase === "analysis_loaded" && (
-              <AIAnalysisPanel data={state.analysis} meta={state.meta} />
-            )}
-            {state.phase === "analysis_error" && (
-              <ErrorMessage
-                title="AI analysis failed"
-                message={state.error}
-                retryable
-                onRetry={handleRetryAnalysis}
-              />
-            )}
-            {/* Show empty placeholder when stock loaded but no analysis yet */}
-            {(state.phase === "stock_loaded") && (
-              <div className="flex h-64 items-center justify-center rounded-xl border border-dashed bg-card/50 text-sm text-muted-foreground">
-                Click &ldquo;Run AI Analysis&rdquo; to get AI insights
+          {/* Chart area */}
+          <div className="flex-1 relative">
+            {candles.length > 0 ? (
+              <div ref={chartRef} className="absolute inset-0" />
+            ) : (
+              <div className="flex items-center justify-center h-full text-xs text-[#94A3B8]/50 font-mono">
+                {isLoading ? "Loading..." : "Enter a ticker symbol to load chart"}
               </div>
             )}
           </div>
-        </div>
-      )}
+        </main>
+
+        {/* Right: AI Quant Panel */}
+        <aside className="w-[240px] shrink-0 border-l border-white/[0.06] overflow-y-auto bg-[#0A0E17]">
+          <div className="px-3 py-2.5 border-b border-white/[0.06]">
+            <span className="text-[10px] font-semibold text-[#94A3B8] uppercase tracking-wider font-mono">
+              AI Quant
+            </span>
+          </div>
+          <AIQuantPanel />
+        </aside>
+      </div>
     </div>
   );
 }
 
-/* ── Empty state ── */
+// Helpers
+function calcEMA(data: CandlePoint[], period: number): number[] {
+  const result: number[] = [];
+  if (data.length < period) return result;
+  let sum = 0;
+  for (let i = 0; i < period; i++) sum += data[i]!.close;
+  const multiplier = 2 / (period + 1);
+  let ema = sum / period;
+  result[period - 1] = ema;
+  for (let i = period; i < data.length; i++) {
+    ema = (data[i]!.close - ema) * multiplier + ema;
+    result.push(ema);
+  }
+  return result;
+}
 
-function EmptyState() {
-  const suggestions = ["AAPL", "TSLA", "600519", "000001", "NVDA"];
-  return (
-    <div className="flex flex-col items-center justify-center py-24 text-center">
-      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
-        <LineChart className="h-7 w-7 text-muted-foreground" aria-hidden="true" />
-      </div>
-      <h2 className="mt-5 text-lg font-semibold">Search a stock to begin</h2>
-      <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-        Enter a ticker symbol above to get real-time market data and AI-driven analysis.
-      </p>
-      <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
-        {suggestions.map((t) => (
-          <span key={t} className="rounded-lg border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
-            {t}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
+function mapSignal(sentiment: string, confidence: number): "Strong Buy" | "Buy" | "Neutral" | "Sell" | "Strong Sell" {
+  if (sentiment === "Bullish") return confidence >= 75 ? "Strong Buy" : "Buy";
+  if (sentiment === "Bearish") return confidence >= 75 ? "Strong Sell" : "Sell";
+  return "Neutral";
 }
