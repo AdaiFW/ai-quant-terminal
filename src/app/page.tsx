@@ -88,20 +88,37 @@ export default function TerminalPage() {
 
   useEffect(() => { if (activeTicker) fetchTicker(activeTicker); }, [activeTicker, fetchTicker]);
 
-  // TradingView chart
+  // Create chart on mount
   useEffect(() => {
-    if (!chartRef.current || candles.length === 0) return;
-    if (chartApiRef.current) { chartApiRef.current.remove(); chartApiRef.current = null; }
+    if (!chartRef.current) return;
+    const container = chartRef.current;
+    if (container.clientWidth === 0) return;
 
-    const chart = createChart(chartRef.current, {
+    const chart = createChart(container, {
       layout: { background: { type: ColorType.Solid, color: "#0A0E17" }, textColor: "#94A3B8" },
       grid: { vertLines: { color: "rgba(255,255,255,0.04)" }, horzLines: { color: "rgba(255,255,255,0.04)" } },
       crosshair: { mode: 0, vertLine: { color: "rgba(255,255,255,0.1)", style: 2 }, horzLine: { color: "rgba(255,255,255,0.1)", style: 2 } },
       rightPriceScale: { borderColor: "rgba(255,255,255,0.06)" },
       timeScale: { borderColor: "rgba(255,255,255,0.06)" },
-      width: chartRef.current.clientWidth,
-      height: chartRef.current.clientHeight,
+      width: container.clientWidth,
+      height: container.clientHeight,
     });
+    chartApiRef.current = chart;
+
+    const ro = new ResizeObserver(() => {
+      if (container.clientWidth > 0) chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+    });
+    ro.observe(container);
+
+    return () => { ro.disconnect(); chart.remove(); chartApiRef.current = null; };
+  }, []);
+
+  // Update chart data when candles change
+  useEffect(() => {
+    const chart = chartApiRef.current;
+    if (!chart || candles.length === 0) return;
+
+    chart.series().forEach((s) => chart.removeSeries(s));
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
       upColor: "#00C087", downColor: "#FF4D4F",
@@ -112,14 +129,12 @@ export default function TerminalPage() {
       time: d.date as string, open: d.open, high: d.high, low: d.low, close: d.close,
     })));
 
-    // EMA 20
     const ema20 = calcEMA(candles, 20);
     if (ema20.length > 0) {
       const emaSeries = chart.addSeries(LineSeries, { color: "#3B82F6", lineWidth: 1 });
       emaSeries.setData(ema20.map((v, i) => ({ time: candles[i]!.date as string, value: v })));
     }
 
-    // Volume
     const volSeries = chart.addSeries(HistogramSeries, {
       color: "rgba(148,163,184,0.3)", priceFormat: { type: "volume" }, priceScaleId: "vol",
     });
@@ -130,11 +145,6 @@ export default function TerminalPage() {
     })));
 
     chart.timeScale().fitContent();
-    chartApiRef.current = chart;
-
-    const resize = () => { if (chartRef.current) chart.applyOptions({ width: chartRef.current.clientWidth }); };
-    window.addEventListener("resize", resize);
-    return () => { window.removeEventListener("resize", resize); chart.remove(); };
   }, [candles]);
 
   return (
