@@ -1,6 +1,13 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  /* ── ESM package compatibility ── */
+  transpilePackages: [
+    "lightweight-charts",
+    "framer-motion",
+    "zustand",
+  ],
+
   /* ── Image optimization ── */
   images: {
     formats: ["image/avif", "image/webp"],
