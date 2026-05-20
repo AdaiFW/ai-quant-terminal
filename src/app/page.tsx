@@ -12,7 +12,7 @@ import {
 import { TickerBar } from "@/components/terminal/ticker-bar";
 import { WatchlistPanel } from "@/components/terminal/watchlist-panel";
 import { AIQuantPanel } from "@/components/terminal/ai-quant-panel";
-import { useTerminalStore } from "@/stores/terminal-store";
+import { useTerminalStore, TICKER_MAP } from "@/stores/terminal-store";
 import type { CandlePoint } from "@/types/stock";
 
 const TIMEFRAMES = ["1D", "1W", "1M", "3M", "1Y", "ALL"];
@@ -28,11 +28,12 @@ export default function TerminalPage() {
 
   // Fetch stock data
   const fetchTicker = useCallback(async (symbol: string) => {
+    const ticker = TICKER_MAP[symbol] || symbol;
     setLoading(true);
     try {
       const [quoteRes, candleRes] = await Promise.all([
-        fetch(`/api/stocks/${symbol}`),
-        fetch(`/api/stocks/${symbol}/candles`),
+        fetch(`/api/stocks/${ticker}`),
+        fetch(`/api/stocks/${ticker}/candles`),
       ]);
       const quote = await quoteRes.json();
       const candle = await candleRes.json();
