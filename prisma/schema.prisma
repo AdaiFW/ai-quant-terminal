@@ -1,0 +1,359 @@
+// ═══════════════════════════════════════════════════════════════
+// AI STOCK PLATFORM — Production Prisma Schema
+// ═══════════════════════════════════════════════════════════════
+// Database:  Supabase PostgreSQL 15+
+// ORM:       Prisma 6.x
+// ID scheme: UUID v4 (native pgcrypto gen_random_uuid)
+// ═══════════════════════════════════════════════════════════════
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearch", "fullTextIndex"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Enums
+// ═══════════════════════════════════════════════════════════════
+
+enum UserRole {
+  USER
+  ANALYST
+  ADMIN
+}
+
+enum SubscriptionTier {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+enum AnalysisType {
+  TECHNICAL
+  FUNDAMENTAL
+  SENTIMENT
+  COMPREHENSIVE
+}
+
+enum AnalysisTimeframe {
+  INTRADAY
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum AnalysisStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum AIProvider {
+  OPENAI
+  ANTHROPIC
+  GOOGLE
+  CUSTOM
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 1. users
+// ═══════════════════════════════════════════════════════════════
+
+model User {
+  id               String           @id @default(uuid()) @db.Uuid
+  email            String           @unique
+  name             String?
+  image            String?
+  role             UserRole         @default(USER)
+  tier             SubscriptionTier @default(FREE)
+  metadata         Json?            @db.JsonB
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
+  // Relations
+  analyses    StockAnalysis[]
+  aiLogs      AILog[]
+  watchlists  Watchlist[]
+  portfolios  Portfolio[]
+
+  @@index([email])
+  @@index([role])
+  @@index([tier])
+  @@map("users")
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 2. stock_cache — denormalized stock metadata + latest price
+// ═══════════════════════════════════════════════════════════════
+
+model StockCache {
+  ticker       String   @id @db.VarChar(10)
+  name         String   @db.VarChar(255)
+  sector       String?  @db.VarChar(100)
+  industry     String?  @db.VarChar(255)
+  country      String?  @db.VarChar(100)
+  currency     String?  @default("USD") @db.VarChar(10)
+  exchange     String?  @db.VarChar(50)
+  assetType    String?  @default("EQUITY") @map("asset_type") @db.VarChar(50)
+
+  // Latest OHLCV snapshot (updated on each fetch)
+  priceData    Json?    @map("price_data") @db.JsonB
+  fundamentals Json?    @db.JsonB
+  metadata     Json?    @db.JsonB
+
+  lastFetchedAt DateTime? @map("last_fetched_at")
+  fetchCount    Int       @default(0) @map("fetch_count")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@index([sector])
+  @@index([exchange])
+  @@index([lastFetchedAt])
+  @@index([name])
+  @@map("stock_cache")
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 3. stock_analysis — audit-ready analysis record
+// ═══════════════════════════════════════════════════════════════
+
+model StockAnalysis {
+  id          String         @id @default(uuid()) @db.Uuid
+  userId      String         @map("user_id") @db.Uuid
+  ticker      String         @db.VarChar(10)
+
+  // Classification
+  analysisType AnalysisType     @map("analysis_type")
+  timeframe    AnalysisTimeframe @default(DAILY)
+
+  // Input parameters (user-controlled)
+  parameters   Json            @db.JsonB
+
+  // AI output: structured JSON analysis result
+  // Schema enforced at application layer (zod); flexible at DB layer.
+  result       Json?           @db.JsonB
+
+  // Quality metrics
+  confidenceScore Decimal?     @map("confidence_score") @db.Decimal(3, 2)
+
+  // Lifecycle
+  status        AnalysisStatus @default(PENDING)
+  startedAt     DateTime?      @map("started_at")
+  completedAt   DateTime?      @map("completed_at")
+  errorMessage  String?        @map("error_message") @db.Text
+  durationMs    Int?           @map("duration_ms")
+
+  // Retry
+  retryCount    Int            @default(0) @map("retry_count")
+  maxRetries    Int            @default(3) @map("max_retries")
+
+  // Versioning (for iterative analysis updates)
+  version       Int            @default(1)
+  parentId      String?        @map("parent_id") @db.Uuid
+
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+
+  // Relations
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  aiLogs   AILog[]
+  retries  AnalysisRetry[]
+
+  // Self-referencing for version chain
+  parent   StockAnalysis?    @relation("AnalysisVersions", fields: [parentId], references: [id], onDelete: SetNull)
+  children StockAnalysis[]   @relation("AnalysisVersions")
+
+  @@index([userId, createdAt])
+  @@index([ticker, createdAt])
+  @@index([ticker, analysisType])
+  @@index([status])
+  @@index([userId, ticker])
+  @@index([createdAt])
+  @@index([confidenceScore])
+  @@map("stock_analysis")
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 4. ai_logs — complete AI prompt/response audit trail
+// ═══════════════════════════════════════════════════════════════
+
+model AILog {
+  id           String    @id @default(uuid()) @db.Uuid
+  analysisId   String?   @map("analysis_id") @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+
+  // Model info
+  provider     AIProvider
+  model        String    @db.VarChar(100)
+  modelVersion String?   @map("model_version") @db.VarChar(50)
+
+  // Prompt & response
+  systemPrompt String?   @map("system_prompt") @db.Text
+  userPrompt   String    @map("user_prompt") @db.Text
+  response     Json      @db.JsonB
+
+  // Tool calls (if any)
+  toolCalls    Json?     @map("tool_calls") @db.JsonB
+
+  // Token usage
+  tokensInput  Int       @map("tokens_input")
+  tokensOutput Int       @map("tokens_output")
+  tokensTotal  Int       @map("tokens_total")
+
+  // Cost tracking (USD, stored as Decimal for precision)
+  cost         Decimal   @default(0) @db.Decimal(10, 6)
+
+  // Performance
+  latencyMs    Int       @map("latency_ms")
+
+  // Outcome
+  isSuccess    Boolean   @map("is_success")
+  errorType    String?   @map("error_type") @db.VarChar(100)
+  errorDetail  String?   @map("error_detail") @db.Text
+
+  // Metadata
+  tags         String[]  @default([]) @db.VarChar(50)
+
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  analysis StockAnalysis? @relation(fields: [analysisId], references: [id], onDelete: SetNull)
+  user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([analysisId])
+  @@index([provider, model])
+  @@index([isSuccess])
+  @@index([createdAt])
+  @@index([cost])
+  @@index([tokensTotal])
+  @@map("ai_logs")
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 5. analysis_retries — per-attempt failure detail
+// ═══════════════════════════════════════════════════════════════
+
+model AnalysisRetry {
+  id            String   @id @default(uuid()) @db.Uuid
+  analysisId    String   @map("analysis_id") @db.Uuid
+  attemptNumber Int      @map("attempt_number")
+
+  // Error detail
+  errorCode     String?  @map("error_code") @db.VarChar(50)
+  errorMessage  String   @map("error_message") @db.Text
+  errorStack    String?  @map("error_stack") @db.Text
+
+  // Context for debugging
+  requestSnapshot  Json? @map("request_snapshot") @db.JsonB
+  responseSnapshot Json? @map("response_snapshot") @db.JsonB
+
+  retryBackoffMs   Int   @default(0) @map("retry_backoff_ms")
+
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  // Relations
+  analysis StockAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+
+  @@index([analysisId])
+  @@index([analysisId, attemptNumber])
+  @@index([errorCode])
+  @@map("analysis_retries")
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 6. watchlists — user-curated stock lists
+// ═══════════════════════════════════════════════════════════════
+
+model Watchlist {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @map("user_id") @db.Uuid
+  name      String           @db.VarChar(100)
+  isDefault Boolean          @default(false) @map("is_default")
+  sortOrder Int              @default(0) @map("sort_order")
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items WatchlistItem[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@map("watchlists")
+}
+
+model WatchlistItem {
+  id          String   @id @default(uuid()) @db.Uuid
+  watchlistId String   @map("watchlist_id") @db.Uuid
+  ticker      String   @db.VarChar(10)
+  addedAt     DateTime @default(now()) @map("added_at")
+  sortOrder   Int      @default(0) @map("sort_order")
+  notes       String?  @db.VarChar(500)
+
+  watchlist Watchlist @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
+
+  @@unique([watchlistId, ticker])
+  @@index([ticker])
+  @@map("watchlist_items")
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 7. portfolios — user portfolio tracking (future feature)
+// ═══════════════════════════════════════════════════════════════
+
+model Portfolio {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  name        String   @db.VarChar(100)
+  description String?  @db.Text
+  isDefault   Boolean  @default(false) @map("is_default")
+  metadata    Json?    @db.JsonB
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  holdings  PortfolioHolding[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@map("portfolios")
+}
+
+model PortfolioHolding {
+  id          String   @id @default(uuid()) @db.Uuid
+  portfolioId String   @map("portfolio_id") @db.Uuid
+  ticker      String   @db.VarChar(10)
+  shares      Decimal  @db.Decimal(18, 8)
+  avgCost     Decimal  @map("avg_cost") @db.Decimal(18, 4)
+  notes       String?  @db.VarChar(500)
+  addedAt     DateTime @default(now()) @map("added_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@unique([portfolioId, ticker])
+  @@index([ticker])
+  @@map("portfolio_holdings")
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Full-text search index (created via migration)
+// ═══════════════════════════════════════════════════════════════
+//
+// CREATE INDEX idx_stock_cache_name_search
+//   ON stock_cache USING gin (to_tsvector('english', name));
+//
+// CREATE INDEX idx_stock_cache_ticker_trgm
+//   ON stock_cache USING gin (ticker gin_trgm_ops);
+//   (requires: CREATE EXTENSION IF NOT EXISTS pg_trgm;)
+//
+// ═══════════════════════════════════════════════════════════════
