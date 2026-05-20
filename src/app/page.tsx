@@ -88,29 +88,49 @@ export default function TerminalPage() {
 
   useEffect(() => { if (activeTicker) fetchTicker(activeTicker); }, [activeTicker, fetchTicker]);
 
-  // Create chart on mount
+  // Create chart once container has dimensions
   useEffect(() => {
     if (!chartRef.current) return;
     const container = chartRef.current;
-    if (container.clientWidth === 0) return;
 
-    const chart = createChart(container, {
-      layout: { background: { type: ColorType.Solid, color: "#0A0E17" }, textColor: "#94A3B8" },
-      grid: { vertLines: { color: "rgba(255,255,255,0.04)" }, horzLines: { color: "rgba(255,255,255,0.04)" } },
-      crosshair: { mode: 0, vertLine: { color: "rgba(255,255,255,0.1)", style: 2 }, horzLine: { color: "rgba(255,255,255,0.1)", style: 2 } },
-      rightPriceScale: { borderColor: "rgba(255,255,255,0.06)" },
-      timeScale: { borderColor: "rgba(255,255,255,0.06)" },
-      width: container.clientWidth,
-      height: container.clientHeight,
-    });
-    chartApiRef.current = chart;
+    let chart: ReturnType<typeof createChart> | null = null;
+    let cancelled = false;
 
-    const ro = new ResizeObserver(() => {
-      if (container.clientWidth > 0) chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
-    });
-    ro.observe(container);
+    // Retry until container has width (flex layout may not be ready)
+    function initChart() {
+      if (cancelled || !container) return;
+      if (container.clientWidth === 0) {
+        requestAnimationFrame(initChart);
+        return;
+      }
+      chart = createChart(container, {
+        layout: { background: { type: ColorType.Solid, color: "#0A0E17" }, textColor: "#94A3B8" },
+        grid: { vertLines: { color: "rgba(255,255,255,0.04)" }, horzLines: { color: "rgba(255,255,255,0.04)" } },
+        crosshair: { mode: 0, vertLine: { color: "rgba(255,255,255,0.1)", style: 2 }, horzLine: { color: "rgba(255,255,255,0.1)", style: 2 } },
+        rightPriceScale: { borderColor: "rgba(255,255,255,0.06)" },
+        timeScale: { borderColor: "rgba(255,255,255,0.06)" },
+        width: container.clientWidth,
+        height: container.clientHeight,
+      });
+      chartApiRef.current = chart;
 
-    return () => { ro.disconnect(); chart.remove(); chartApiRef.current = null; };
+      const ro = new ResizeObserver(() => {
+        if (container.clientWidth > 0) chart!.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+      });
+      ro.observe(container);
+      // Store cleanup reference
+      (container as Record<string, unknown>)._ro = ro;
+    }
+
+    requestAnimationFrame(initChart);
+
+    return () => {
+      cancelled = true;
+      const ro = (container as Record<string, unknown>)._ro as ResizeObserver | undefined;
+      ro?.disconnect();
+      if (chart) { chart.remove(); chart = null; }
+      chartApiRef.current = null;
+    };
   }, []);
 
   // Update chart data when candles change
@@ -217,10 +237,9 @@ export default function TerminalPage() {
 
           {/* Chart area */}
           <div className="flex-1 relative">
-            {candles.length > 0 ? (
-              <div ref={chartRef} className="absolute inset-0" />
-            ) : (
-              <div className="flex items-center justify-center h-full text-xs text-[#94A3B8]/50 font-mono">
+            <div ref={chartRef} className="absolute inset-0" />
+            {candles.length === 0 && (
+              <div className="absolute inset-0 flex items-center justify-center text-xs text-[#94A3B8]/50 font-mono pointer-events-none">
                 {isLoading ? "Loading..." : "Enter a ticker symbol to load chart"}
               </div>
             )}
