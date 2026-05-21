@@ -12,7 +12,7 @@ import {
   ValidationError,
 } from "@/lib/ai/validation";
 import { aiAnalysisOutputSchema } from "@/types/ai-analysis";
-import { db } from "@/lib/db";
+import { insertAnalysis, insertAILog } from "@/lib/supabase/db";
 import {
   type AIAnalysisRequest,
   type AIAnalysisApiResponse,
@@ -126,46 +126,35 @@ interface PersistParams {
 }
 
 async function persistAnalysis(p: PersistParams): Promise<string> {
-  const analysis = await db.stockAnalysis.create({
-    data: {
-      userId: "system",
-      ticker: p.request.ticker,
-      analysisType: p.request.analysisType as never,
-      timeframe: p.request.timeframe as never,
-      parameters: {
-        currentPrice: p.request.stockData.currentPrice,
-        dailyChangePercent: p.request.stockData.dailyChangePercent,
-        volume: p.request.stockData.volume,
-        fallbackUsed: p.fallbackUsed,
-      },
-      result: p.result,
-      confidenceScore: (p.result as { confidence: number }).confidence,
-      status: "COMPLETED",
-      startedAt: new Date(),
-      completedAt: new Date(),
-      durationMs: p.latencyMs,
-      retryCount: 0,
+  const { data: analysis } = await insertAnalysis({
+    ticker: p.request.ticker,
+    analysisType: p.request.analysisType,
+    timeframe: p.request.timeframe,
+    parameters: {
+      currentPrice: p.request.stockData.currentPrice,
+      dailyChangePercent: p.request.stockData.dailyChangePercent,
+      volume: p.request.stockData.volume,
+      fallbackUsed: p.fallbackUsed,
     },
+    result: p.result,
+    confidenceScore: (p.result as { confidence: number }).confidence,
+    durationMs: p.latencyMs,
   });
 
-  await db.aILog.create({
-    data: {
-      analysisId: analysis.id,
-      userId: "system",
-      provider: "DEEPSEEK" as never,
-      model: process.env.AI_MODEL || "deepseek-chat",
-      response: p.result,
-      tokensInput: p.tokensInput,
-      tokensOutput: p.tokensOutput,
-      tokensTotal: p.tokensInput + p.tokensOutput,
-      latencyMs: p.latencyMs,
-      isSuccess: true,
-      cost: 0,
-      createdAt: new Date(),
-    },
+  const analysisId = analysis?.id;
+
+  await insertAILog({
+    analysisId,
+    provider: "DEEPSEEK",
+    model: process.env.AI_MODEL || "deepseek-chat",
+    response: p.result,
+    tokensInput: p.tokensInput,
+    tokensOutput: p.tokensOutput,
+    latencyMs: p.latencyMs,
+    isSuccess: true,
   });
 
-  return analysis.id;
+  return analysisId ?? "local";
 }
 }
 
@@ -176,23 +165,16 @@ async function logFailedAttempt(
 ): Promise<void> {
   try {
     const message = error instanceof Error ? error.message : String(error);
-    await db.aILog.create({
-      data: {
-        userId: "system",
-        provider: "DEEPSEEK" as never,
-        model: process.env.AI_MODEL || "deepseek-chat",
-        userPrompt: `Analyze ${request.ticker} — ${request.analysisType}`,
-        response: { error: message },
-        tokensInput: 0,
-        tokensOutput: 0,
-        tokensTotal: 0,
-        latencyMs,
-        isSuccess: false,
-        errorType: "AI_GENERATION_FAILED",
-        errorDetail: message,
-        cost: 0,
-        createdAt: new Date(),
-      },
+    await insertAILog({
+      provider: "DEEPSEEK",
+      model: process.env.AI_MODEL || "deepseek-chat",
+      response: { error: message },
+      tokensInput: 0,
+      tokensOutput: 0,
+      latencyMs,
+      isSuccess: false,
+      errorType: "AI_GENERATION_FAILED",
+      errorDetail: message,
     });
   } catch {
     // Non-critical
