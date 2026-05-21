@@ -7,7 +7,7 @@ export function TickerBar() {
   const tickers = useTerminalStore((s) => s.tickerBar);
 
   return (
-    <div className="flex h-8 items-center border-b border-white/[0.06] bg-[#0A0E17] overflow-hidden group">
+    <div className="flex h-8 items-center border-b border-white/[0.06] bg-[#0A0E17] overflow-hidden group" suppressHydrationWarning>
       <div className="flex animate-scroll-x gap-0 group-hover:[animation-play-state:paused]">
         {[...tickers, ...tickers].map((t, i) => (
           <div
