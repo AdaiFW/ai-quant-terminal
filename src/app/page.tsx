@@ -29,10 +29,10 @@ export default function TerminalPage() {
     isLoading, isAnalyzing, tickerData, setTickerData, setTimeframe,
   } = useTerminalStore();
 
-  // Auto-fetch when activeTicker changes (from watchlist, ticker bar, or search)
+  // Auto-fetch when activeTicker or timeframe changes
   useEffect(() => {
     if (activeTicker) fetchTicker(activeTicker);
-  }, [activeTicker]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeTicker, timeframe]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch stock data
   const fetchTicker = useCallback(async (symbol: string) => {

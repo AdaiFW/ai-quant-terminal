@@ -103,7 +103,7 @@ export interface AlphaVantageQuoteRaw {
 
 // ── Provider interface ──
 
-export type StockProvider = "finnhub" | "alphavantage" | "eastmoney";
+export type StockProvider = "eastmoney";
 
 // ── Candlestick (OHLCV history) ──
 

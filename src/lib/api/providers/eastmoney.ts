@@ -8,7 +8,11 @@
 import { fetchWithRetry } from "../fetcher";
 
 const QUOTE_URL = "https://push2.eastmoney.com/api/qt/stock/get";
-const KLINE_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get";
+// K-line uses randomized subdomain for load balancing / access
+function klineUrl(): string {
+  const n = Math.floor(Math.random() * 99) + 1;
+  return `https://${n}.push2his.eastmoney.com/api/qt/stock/kline/get`;
+}
 
 interface EMRaw {
   data?: {
@@ -62,7 +66,7 @@ export async function fetchKline(
     .toISOString().slice(0, 10).replace(/-/g, "");
 
   const raw = await fetchWithRetry<EMKlineRaw>(
-    `${KLINE_URL}?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=0&beg=${start}&end=${end}`,
+    `${klineUrl()}?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=0&beg=${start}&end=${end}`,
   );
   const klines = raw.data?.klines;
   if (!klines || klines.length === 0) return [];
