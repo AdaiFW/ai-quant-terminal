@@ -29,10 +29,18 @@ export default function TerminalPage() {
     isLoading, isAnalyzing, tickerData, setTickerData, setTimeframe,
   } = useTerminalStore();
 
+  // Auto-fetch when activeTicker changes (from watchlist, ticker bar, or search)
+  useEffect(() => {
+    if (activeTicker) fetchTicker(activeTicker);
+  }, [activeTicker]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Fetch stock data
   const fetchTicker = useCallback(async (symbol: string) => {
     const ticker = TICKER_MAP[symbol] || symbol;
+    setActiveTicker(ticker);
     setLoading(true);
+    setCandles([]);
+    setAIData(null);
     try {
       const [quoteRes, candleRes] = await Promise.all([
         fetch(`/api/stocks/${ticker}`),
@@ -41,10 +49,14 @@ export default function TerminalPage() {
       const quote = await quoteRes.json();
       const candle = await candleRes.json();
       if (quote.success) setTickerData(quote.data);
+      else console.warn("Quote fetch failed:", quote.error?.message);
       if (candle.success) setCandles(candle.data);
-    } catch { /* silent */ }
+      else console.warn("Candles fetch failed:", candle.error?.message);
+    } catch (err) {
+      console.warn("Fetch error:", err);
+    }
     setLoading(false);
-  }, [setLoading, setTickerData, setCandles]);
+  }, [setActiveTicker, setLoading, setTickerData, setCandles, setAIData]);
 
   // Fetch AI analysis
   const runAnalysis = useCallback(async () => {
@@ -129,11 +141,11 @@ export default function TerminalPage() {
     const ema50 = calcEMA(candles, 50);
     if (ema20.length > 0) {
       chart.addSeries(LineSeries, { color: "#3B82F6", lineWidth: 1 })
-        .setData(ema20.map((v, i) => ({ time: candles[i]!.date as string, value: v })));
+        .setData(ema20.map((d) => ({ time: candles[d.idx]!.date as string, value: d.value })));
     }
     if (ema50.length > 0) {
       chart.addSeries(LineSeries, { color: "#F59E0B", lineWidth: 1, lineStyle: 2 })
-        .setData(ema50.map((v, i) => ({ time: candles[i]!.date as string, value: v })));
+        .setData(ema50.map((d) => ({ time: candles[d.idx]!.date as string, value: d.value })));
     }
 
     // Volume
@@ -319,17 +331,17 @@ export default function TerminalPage() {
 }
 
 // Helpers
-function calcEMA(data: CandlePoint[], period: number): number[] {
-  const result: number[] = [];
+function calcEMA(data: CandlePoint[], period: number): { idx: number; value: number }[] {
+  const result: { idx: number; value: number }[] = [];
   if (data.length < period) return result;
   let sum = 0;
   for (let i = 0; i < period; i++) sum += data[i]!.close;
   const multiplier = 2 / (period + 1);
   let ema = sum / period;
-  result[period - 1] = ema;
+  result.push({ idx: period - 1, value: ema });
   for (let i = period; i < data.length; i++) {
     ema = (data[i]!.close - ema) * multiplier + ema;
-    result.push(ema);
+    result.push({ idx: i, value: ema });
   }
   return result;
 }
@@ -380,32 +392,44 @@ function mapSignal(sentiment: string, confidence: number): "Strong Buy" | "Buy" 
 
 function calcMACD(data: CandlePoint[]): { idx: number; macd: number; signal: number; histogram: number }[] {
   const result: ReturnType<typeof calcMACD>[] = [];
-  if (data.length < 26) return result;
+  if (data.length < 34) return result;
   const ema12 = calcEMA(data, 12);
   const ema26 = calcEMA(data, 26);
-  const macdVals: number[] = [];
-  for (let i = 25; i < data.length; i++) {
-    macdVals.push(ema12[i]! - ema26[i]!);
+
+  // Align EMAs - start from the first common index
+  const macdVals: { idx: number; value: number }[] = [];
+  let j = 0;
+  while (j < ema26.length && ema12[j]!.idx < ema26[0]!.idx) j++;
+  for (let k = 0; k < ema26.length && j < ema12.length; k++, j++) {
+    const e12 = ema12[j]!;
+    const e26 = ema26[k]!;
+    if (e12.idx === e26.idx) {
+      macdVals.push({ idx: e12.idx, value: e12.value - e26.value });
+    }
   }
+
   const sigVals = calcEMAVal(macdVals, 9);
   for (let i = 0; i < sigVals.length; i++) {
-    const m = macdVals[i + 8]!;
     const s = sigVals[i]!;
-    result.push({ idx: i + 34, macd: m, signal: s, histogram: m - s });
+    const m = macdVals[i + 8]!;
+    result.push({ idx: m.idx, macd: m.value, signal: s.value, histogram: m.value - s.value });
   }
   return result;
 }
 
-function calcEMAVal(values: number[], period: number): number[] {
+function calcEMAVal(
+  values: { idx: number; value: number }[],
+  period: number,
+): { idx: number; value: number }[] {
   if (values.length < period) return [];
   let sum = 0;
-  for (let i = 0; i < period; i++) sum += values[i]!;
+  for (let i = 0; i < period; i++) sum += values[i]!.value;
   const multiplier = 2 / (period + 1);
   let ema = sum / period;
-  const result = [ema];
+  const result = [{ idx: values[period - 1]!.idx, value: ema }];
   for (let i = period; i < values.length; i++) {
-    ema = (values[i]! - ema) * multiplier + ema;
-    result.push(ema);
+    ema = (values[i]!.value - ema) * multiplier + ema;
+    result.push({ idx: values[i]!.idx, value: ema });
   }
   return result;
 }
