@@ -20,10 +20,11 @@ import { StockServiceError, InvalidTickerError } from "@/lib/api/errors";
 type EffectiveProvider = StockProvider;
 
 function resolveProvider(ticker: string): EffectiveProvider {
-  // CN tickers (6-digit numeric) always use eastmoney
-  if (/^\d{6}$/.test(ticker)) return "eastmoney";
+  // Eastmoney covers US + CN stocks without rate limits — use as default
   const configured = process.env.STOCK_PROVIDER as StockProvider | undefined;
-  return configured || "finnhub";
+  if (configured) return configured;
+  // Default to eastmoney for everything (US + CN, no rate limits)
+  return "eastmoney";
 }
 
 /* ── Cache key ── */

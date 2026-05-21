@@ -22,13 +22,14 @@ export async function GET(
   }
   const ticker = parsed.data;
 
-  const isCN = /^\d{6}$/.test(ticker);
-
   try {
-    const provider = isCN ? "eastmoney" : "finnhub";
+    const provider = "eastmoney";
     const { data, cached } = await withCache(
       `candles:${ticker}:D:120`,
-      () => fetchCandles(ticker, isCN),
+      async () => {
+        const { fetchKline } = await import("@/lib/api/providers/eastmoney");
+        return fetchKline(ticker, 120);
+      },
     );
 
     return NextResponse.json(
@@ -53,30 +54,7 @@ export async function GET(
           message: err instanceof Error ? err.message : "Unknown error",
         },
       },
-      { status: 500 },
+      { status: 502 },
     );
   }
-}
-
-async function fetchCandles(ticker: string, isCN: boolean): Promise<CandlePoint[]> {
-  if (isCN) {
-    const { fetchKline } = await import("@/lib/api/providers/eastmoney");
-    return fetchKline(ticker, 120);
-  }
-
-  const { fetchCandles: fetchFinnhub } = await import("@/lib/api/providers/finnhub");
-  const to = Math.floor(Date.now() / 1000);
-  const from = to - 120 * 24 * 60 * 60; // ~120 trading days
-  const raw = await fetchFinnhub(ticker, "D", from, to);
-
-  if (!raw) return [];
-
-  return raw.t.map((ts, i) => ({
-    date: new Date(ts * 1000).toISOString().slice(0, 10),
-    open: raw.o[i]!,
-    high: raw.h[i]!,
-    low: raw.l[i]!,
-    close: raw.c[i]!,
-    volume: raw.v[i] ?? 0,
-  }));
 }
