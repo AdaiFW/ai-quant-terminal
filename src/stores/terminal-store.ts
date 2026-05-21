@@ -56,9 +56,15 @@ export const TICKER_MAP: Record<string, string> = {
 
 const DEFAULT_WATCHLIST = [
   // US stocks
-  "AAPL", "TSLA", "NVDA", "MSFT", "GOOGL", "AMZN", "META",
+  "AAPL", "TSLA", "NVDA", "MSFT", "GOOGL", "AMZN", "META", "NFLX",
+  "AMD", "INTC", "BABA", "PLTR", "CRM", "ADBE", "DIS", "BA",
+  "JPM", "GS", "V", "MA", "WMT", "KO", "PEP", "XOM", "CVX",
+  "PYPL", "UBER", "SNOW", "COIN", "RBLX", "SOFI",
   // A-shares
   "600519", "000001", "000858", "600036", "000333", "002415",
+  "601318", "600030", "000002", "300750", "002594", "600900",
+  "688981", "601899", "603259", "000725", "002714", "300059",
+  "600585", "000063", "002475", "601012", "600031", "000651",
 ];
 const DEFAULT_TICKERS: TickerItem[] = [
   // US
