@@ -12,6 +12,9 @@ import {
 import { TickerBar } from "@/components/terminal/ticker-bar";
 import { WatchlistPanel } from "@/components/terminal/watchlist-panel";
 import { AIQuantPanel } from "@/components/terminal/ai-quant-panel";
+import { FearGreedIndex } from "@/components/terminal/fear-greed";
+import { TrendingStocks } from "@/components/terminal/trending-stocks";
+import { StatusBar } from "@/components/terminal/status-bar";
 import { useTerminalStore, TICKER_MAP } from "@/stores/terminal-store";
 import type { CandlePoint } from "@/types/stock";
 
@@ -139,8 +142,11 @@ export default function TerminalPage() {
     const chart = chartApiRef.current;
     if (!chart || candles.length === 0) return;
 
+    // Remove all panes except main
+    while (chart.panes().length > 1) chart.removePane(chart.panes()[1]!);
     chart.series().forEach((s) => chart.removeSeries(s));
 
+    // Candlestick
     const candleSeries = chart.addSeries(CandlestickSeries, {
       upColor: "#00C087", downColor: "#FF4D4F",
       borderUpColor: "#00C087", borderDownColor: "#FF4D4F",
@@ -150,20 +156,71 @@ export default function TerminalPage() {
       time: d.date as string, open: d.open, high: d.high, low: d.low, close: d.close,
     })));
 
+    // EMA 20 + 50
     const ema20 = calcEMA(candles, 20);
+    const ema50 = calcEMA(candles, 50);
     if (ema20.length > 0) {
-      const emaSeries = chart.addSeries(LineSeries, { color: "#3B82F6", lineWidth: 1 });
-      emaSeries.setData(ema20.map((v, i) => ({ time: candles[i]!.date as string, value: v })));
+      chart.addSeries(LineSeries, { color: "#3B82F6", lineWidth: 1 })
+        .setData(ema20.map((v, i) => ({ time: candles[i]!.date as string, value: v })));
+    }
+    if (ema50.length > 0) {
+      chart.addSeries(LineSeries, { color: "#F59E0B", lineWidth: 1, lineStyle: 2 })
+        .setData(ema50.map((v, i) => ({ time: candles[i]!.date as string, value: v })));
     }
 
+    // Volume (20% of main pane)
     const volSeries = chart.addSeries(HistogramSeries, {
-      color: "rgba(148,163,184,0.3)", priceFormat: { type: "volume" }, priceScaleId: "vol",
+      priceFormat: { type: "volume" }, priceScaleId: "vol",
     });
-    chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 }, visible: false });
+    chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.78, bottom: 0 }, visible: false });
     volSeries.setData(candles.map((d: CandlePoint) => ({
       time: d.date as string, value: d.volume,
       color: d.close >= d.open ? "rgba(0,192,135,0.4)" : "rgba(255,77,79,0.4)",
     })));
+
+    // MACD pane (20% height)
+    const macdPane = chart.addPane({ height: 120 });
+    const macd = calcMACD(candles);
+    if (macd.length > 0) {
+      macdPane.addSeries(HistogramSeries, {
+        color: "rgba(148,163,184,0.5)",
+      }).setData(macd.map((d) => ({ time: candles[d.idx]!.date as string, value: d.histogram })));
+      macdPane.addSeries(LineSeries, { color: "#3B82F6", lineWidth: 1 })
+        .setData(macd.map((d) => ({ time: candles[d.idx]!.date as string, value: d.macd })));
+      macdPane.addSeries(LineSeries, { color: "#F59E0B", lineWidth: 1 })
+        .setData(macd.map((d) => ({ time: candles[d.idx]!.date as string, value: d.signal })));
+    }
+
+    // Bollinger Bands (main pane overlay)
+    const bb = calcBollinger(candles, 20, 2);
+    if (bb.length > 0) {
+      chart.addSeries(LineSeries, { color: "rgba(245,158,11,0.4)", lineWidth: 1, lastValueVisible: false })
+        .setData(bb.map((d) => ({ time: candles[d.idx]!.date as string, value: d.upper })));
+      chart.addSeries(LineSeries, { color: "rgba(139,92,246,0.4)", lineWidth: 1, lastValueVisible: false })
+        .setData(bb.map((d) => ({ time: candles[d.idx]!.date as string, value: d.middle })));
+      chart.addSeries(LineSeries, { color: "rgba(245,158,11,0.4)", lineWidth: 1, lastValueVisible: false })
+        .setData(bb.map((d) => ({ time: candles[d.idx]!.date as string, value: d.lower })));
+    }
+
+    // VWAP
+    const vwap = calcVWAP(candles);
+    if (vwap.length > 0) {
+      chart.addSeries(LineSeries, { color: "rgba(236,72,153,0.5)", lineWidth: 1, lineStyle: 3 })
+        .setData(vwap.map((d) => ({ time: candles[d.idx]!.date as string, value: d.value })));
+    }
+
+    // RSI pane (15% height)
+    const rsiPane = chart.addPane({ height: 90 });
+    const rsi = calcRSI(candles, 14);
+    if (rsi.length > 0) {
+      rsiPane.addSeries(LineSeries, { color: "#8B5CF6", lineWidth: 1 })
+        .setData(rsi.map((d) => ({ time: candles[d.idx]!.date as string, value: d.value })));
+      rsiPane.addSeries(LineSeries, { color: "rgba(255,77,79,0.3)", lineWidth: 1, lineStyle: 2, lastValueVisible: false })
+        .setData(rsi.map((d) => ({ time: candles[d.idx]!.date as string, value: 70 })));
+      rsiPane.addSeries(LineSeries, { color: "rgba(0,192,135,0.3)", lineWidth: 1, lineStyle: 2, lastValueVisible: false })
+        .setData(rsi.map((d) => ({ time: candles[d.idx]!.date as string, value: 30 })));
+    }
+    rsiPane.priceScale().applyOptions({ autoScale: false, topMargin: 0, bottomMargin: 0 });
 
     chart.timeScale().fitContent();
   }, [candles]);
@@ -190,9 +247,14 @@ export default function TerminalPage() {
                   <span className="text-sm font-bold font-mono tracking-tight text-[#E5E7EB]">
                     {activeTicker}
                   </span>
-                  <span className="text-sm font-bold tabular-nums font-mono text-[#E5E7EB]">
+                  <motion.span
+                    key={tickerData.currentPrice}
+                    animate={{ opacity: [0.7, 1] }}
+                    transition={{ duration: 0.3 }}
+                    className="text-sm font-bold tabular-nums font-mono text-[#E5E7EB]"
+                  >
                     {tickerData.currency === "CNY" ? "¥" : "$"}{tickerData.currentPrice.toFixed(2)}
-                  </span>
+                  </motion.span>
                   <span className={`text-xs font-mono tabular-nums ${tickerData.dailyChange >= 0 ? "text-[#00C087]" : "text-[#FF4D4F]"}`}>
                     {tickerData.dailyChange >= 0 ? "+" : ""}{tickerData.dailyChangePercent.toFixed(2)}%
                   </span>
@@ -270,8 +332,12 @@ export default function TerminalPage() {
             </span>
           </div>
           <AIQuantPanel />
+          <FearGreedIndex />
+          <TrendingStocks />
         </aside>
       </div>
+
+      <StatusBar />
     </div>
   );
 }
@@ -292,8 +358,98 @@ function calcEMA(data: CandlePoint[], period: number): number[] {
   return result;
 }
 
+function calcBollinger(data: CandlePoint[], period: number, mult: number): { idx: number; upper: number; middle: number; lower: number }[] {
+  const result: ReturnType<typeof calcBollinger>[] = [];
+  if (data.length < period) return result;
+  const sma = calcSMA(data, period);
+  for (let i = 0; i < sma.length; i++) {
+    const slice = data.slice(i, i + period);
+    const mean = sma[i]!;
+    let variance = 0;
+    for (const d of slice) variance += (d.close - mean) ** 2;
+    const std = Math.sqrt(variance / period);
+    result.push({ idx: i + period - 1, upper: mean + mult * std, middle: mean, lower: mean - mult * std });
+  }
+  return result;
+}
+
+function calcSMA(data: CandlePoint[], period: number): number[] {
+  const result: number[] = [];
+  for (let i = period - 1; i < data.length; i++) {
+    let sum = 0;
+    for (let j = 0; j < period; j++) sum += data[i - j]!.close;
+    result.push(sum / period);
+  }
+  return result;
+}
+
+function calcVWAP(data: CandlePoint[]): { idx: number; value: number }[] {
+  const result: { idx: number; value: number }[] = [];
+  let cumPV = 0, cumV = 0;
+  for (let i = 0; i < data.length; i++) {
+    const d = data[i]!;
+    const tp = (d.high + d.low + d.close) / 3;
+    cumPV += tp * d.volume;
+    cumV += d.volume;
+    if (cumV > 0) result.push({ idx: i, value: cumPV / cumV });
+  }
+  return result;
+}
+
 function mapSignal(sentiment: string, confidence: number): "Strong Buy" | "Buy" | "Neutral" | "Sell" | "Strong Sell" {
   if (sentiment === "Bullish") return confidence >= 75 ? "Strong Buy" : "Buy";
   if (sentiment === "Bearish") return confidence >= 75 ? "Strong Sell" : "Sell";
   return "Neutral";
+}
+
+function calcMACD(data: CandlePoint[]): { idx: number; macd: number; signal: number; histogram: number }[] {
+  const result: ReturnType<typeof calcMACD>[] = [];
+  if (data.length < 26) return result;
+  const ema12 = calcEMA(data, 12);
+  const ema26 = calcEMA(data, 26);
+  const macdVals: number[] = [];
+  for (let i = 25; i < data.length; i++) {
+    macdVals.push(ema12[i]! - ema26[i]!);
+  }
+  const sigVals = calcEMAVal(macdVals, 9);
+  for (let i = 0; i < sigVals.length; i++) {
+    const m = macdVals[i + 8]!;
+    const s = sigVals[i]!;
+    result.push({ idx: i + 34, macd: m, signal: s, histogram: m - s });
+  }
+  return result;
+}
+
+function calcEMAVal(values: number[], period: number): number[] {
+  if (values.length < period) return [];
+  let sum = 0;
+  for (let i = 0; i < period; i++) sum += values[i]!;
+  const multiplier = 2 / (period + 1);
+  let ema = sum / period;
+  const result = [ema];
+  for (let i = period; i < values.length; i++) {
+    ema = (values[i]! - ema) * multiplier + ema;
+    result.push(ema);
+  }
+  return result;
+}
+
+function calcRSI(data: CandlePoint[], period: number): { idx: number; value: number }[] {
+  const result: { idx: number; value: number }[] = [];
+  if (data.length < period + 1) return result;
+  let gains = 0, losses = 0;
+  for (let i = 1; i <= period; i++) {
+    const diff = data[i]!.close - data[i - 1]!.close;
+    if (diff >= 0) gains += diff; else losses -= diff;
+  }
+  let avgGain = gains / period;
+  let avgLoss = losses / period;
+  result.push({ idx: period, value: avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss) });
+  for (let i = period + 1; i < data.length; i++) {
+    const diff = data[i]!.close - data[i - 1]!.close;
+    avgGain = (avgGain * (period - 1) + (diff >= 0 ? diff : 0)) / period;
+    avgLoss = (avgLoss * (period - 1) + (diff < 0 ? -diff : 0)) / period;
+    result.push({ idx: i, value: avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss) });
+  }
+  return result;
 }
