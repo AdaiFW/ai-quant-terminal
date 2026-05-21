@@ -1,8 +1,8 @@
-# AI Quant Terminal
+# AI Stock Analysis
 
-**Institutional AI-powered stock analysis and trading workstation.**
+**Institutional AI-powered quantitative stock analysis platform.**
 
-A professional quantitative trading terminal that combines real-time market data, advanced technical charts, and AI-driven structured analysis — inspired by TradingView, Bloomberg Terminal, Binance Pro, and Perplexity AI.
+A professional AI trading workstation that combines real-time multi-market data, TradingView-grade technical charting, and structured AI quant analysis — inspired by TradingView, Bloomberg Terminal, Binance Pro, and Perplexity AI.
 
 ---
 
