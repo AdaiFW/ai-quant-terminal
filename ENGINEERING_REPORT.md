@@ -1,6 +1,6 @@
-# 工程报告：AI 量化终端
+# 工程报告：AI Stock Analysis
 
-**面向机构级 AI 驱动型量化交易工作站的生产级交付文档。**
+**面向机构级 AI 驱动型股票分析平台的生产级交付文档。**
 
 **作者：** AdaiFW
 **仓库：** [github.com/AdaiFW/ai-quant-terminal](https://github.com/AdaiFW/ai-quant-terminal)
@@ -12,7 +12,7 @@
 
 ### 1.1 项目定义
 
-AI Quant Terminal 是一个专业的金融分析平台，将实时多市场股票数据、机构级技术图表和 AI 驱动的结构化量化分析整合为一个高密度交易工作站。
+AI Stock Analysis 是一个专业的 AI 股票分析平台，将实时多市场股票数据、机构级技术图表和 AI 驱动的结构化量化分析整合为高密度分析工具。
 
 ### 1.2 设计哲学
 
@@ -714,4 +714,4 @@ Muted:       #94A3B8 （冷灰色 — 辅助信息）
 
 ---
 
-*AI Quant Terminal 工程报告。以 Claude Code、DeepSeek V4 Pro 及生产优先的工程思维构建。*
+*AI Stock Analysis 工程报告。以 Claude Code、DeepSeek V4 Pro 及生产优先的工程思维构建。*
