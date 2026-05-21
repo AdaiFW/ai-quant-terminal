@@ -92,67 +92,35 @@ export default function TerminalPage() {
 
   useEffect(() => { if (activeTicker) fetchTicker(activeTicker); }, [activeTicker, fetchTicker]);
 
-  // Create chart once container has dimensions
+  // Create chart when candles data arrives
   useEffect(() => {
-    if (!chartRef.current) return;
+    if (candles.length === 0) return;
     const container = chartRef.current;
+    if (!container) return;
 
-    let chart: ReturnType<typeof createChart> | null = null;
-    let cancelled = false;
-
-    // Retry until container has width (flex layout may not be ready)
-    function initChart() {
-      if (cancelled || !container) return;
-      if (container.clientWidth === 0) {
-        requestAnimationFrame(initChart);
-        return;
-      }
-      chart = createChart(container, {
-        layout: { background: { type: ColorType.Solid, color: "#0A0E17" }, textColor: "#94A3B8" },
-        grid: { vertLines: { color: "rgba(255,255,255,0.04)" }, horzLines: { color: "rgba(255,255,255,0.04)" } },
-        crosshair: { mode: 0, vertLine: { color: "rgba(255,255,255,0.1)", style: 2 }, horzLine: { color: "rgba(255,255,255,0.1)", style: 2 } },
-        rightPriceScale: { borderColor: "rgba(255,255,255,0.06)" },
-        timeScale: { borderColor: "rgba(255,255,255,0.06)" },
-        width: container.clientWidth,
-        height: container.clientHeight,
-      });
-      chartApiRef.current = chart;
-
-      const ro = new ResizeObserver(() => {
-        if (container.clientWidth > 0) chart!.applyOptions({ width: container.clientWidth, height: container.clientHeight });
-      });
-      ro.observe(container);
-      // Store cleanup reference
-      (container as Record<string, unknown>)._ro = ro;
+    // Destroy old chart
+    if (chartApiRef.current) {
+      chartApiRef.current.remove();
+      chartApiRef.current = null;
     }
 
-    requestAnimationFrame(initChart);
-
-    return () => {
-      cancelled = true;
-      const ro = (container as Record<string, unknown>)._ro as ResizeObserver | undefined;
-      ro?.disconnect();
-      if (chart) { chart.remove(); chart = null; }
-      chartApiRef.current = null;
-    };
-  }, []);
-
-  // Update chart data when candles change
-  useEffect(() => {
-    const chart = chartApiRef.current;
-    if (!chart || candles.length === 0) return;
-
-    // Remove all panes except main
-    while (chart.panes().length > 1) chart.removePane(chart.panes()[1]!);
-    chart.series().forEach((s) => chart.removeSeries(s));
+    const chart = createChart(container, {
+      layout: { background: { type: ColorType.Solid, color: "#0A0E17" }, textColor: "#94A3B8" },
+      grid: { vertLines: { color: "rgba(255,255,255,0.04)" }, horzLines: { color: "rgba(255,255,255,0.04)" } },
+      crosshair: { mode: 0, vertLine: { color: "rgba(255,255,255,0.1)", style: 2 }, horzLine: { color: "rgba(255,255,255,0.1)", style: 2 } },
+      rightPriceScale: { borderColor: "rgba(255,255,255,0.06)" },
+      timeScale: { borderColor: "rgba(255,255,255,0.06)" },
+      width: container.clientWidth,
+      height: container.clientHeight,
+    });
+    chartApiRef.current = chart;
 
     // Candlestick
-    const candleSeries = chart.addSeries(CandlestickSeries, {
+    chart.addSeries(CandlestickSeries, {
       upColor: "#00C087", downColor: "#FF4D4F",
       borderUpColor: "#00C087", borderDownColor: "#FF4D4F",
       wickUpColor: "#00C087", wickDownColor: "#FF4D4F",
-    });
-    candleSeries.setData(candles.map((d: CandlePoint) => ({
+    }).setData(candles.map((d: CandlePoint) => ({
       time: d.date as string, open: d.open, high: d.high, low: d.low, close: d.close,
     })));
 
@@ -168,30 +136,16 @@ export default function TerminalPage() {
         .setData(ema50.map((v, i) => ({ time: candles[i]!.date as string, value: v })));
     }
 
-    // Volume (20% of main pane)
-    const volSeries = chart.addSeries(HistogramSeries, {
+    // Volume
+    chart.addSeries(HistogramSeries, {
       priceFormat: { type: "volume" }, priceScaleId: "vol",
-    });
-    chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.78, bottom: 0 }, visible: false });
-    volSeries.setData(candles.map((d: CandlePoint) => ({
+    }).setData(candles.map((d: CandlePoint) => ({
       time: d.date as string, value: d.volume,
       color: d.close >= d.open ? "rgba(0,192,135,0.4)" : "rgba(255,77,79,0.4)",
     })));
+    chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.78, bottom: 0 }, visible: false });
 
-    // MACD pane (20% height)
-    const macdPane = chart.addPane({ height: 120 });
-    const macd = calcMACD(candles);
-    if (macd.length > 0) {
-      macdPane.addSeries(HistogramSeries, {
-        color: "rgba(148,163,184,0.5)",
-      }).setData(macd.map((d) => ({ time: candles[d.idx]!.date as string, value: d.histogram })));
-      macdPane.addSeries(LineSeries, { color: "#3B82F6", lineWidth: 1 })
-        .setData(macd.map((d) => ({ time: candles[d.idx]!.date as string, value: d.macd })));
-      macdPane.addSeries(LineSeries, { color: "#F59E0B", lineWidth: 1 })
-        .setData(macd.map((d) => ({ time: candles[d.idx]!.date as string, value: d.signal })));
-    }
-
-    // Bollinger Bands (main pane overlay)
+    // Bollinger Bands
     const bb = calcBollinger(candles, 20, 2);
     if (bb.length > 0) {
       chart.addSeries(LineSeries, { color: "rgba(245,158,11,0.4)", lineWidth: 1, lastValueVisible: false })
@@ -209,7 +163,19 @@ export default function TerminalPage() {
         .setData(vwap.map((d) => ({ time: candles[d.idx]!.date as string, value: d.value })));
     }
 
-    // RSI pane (15% height)
+    // MACD pane
+    const macdPane = chart.addPane({ height: 120 });
+    const macd = calcMACD(candles);
+    if (macd.length > 0) {
+      macdPane.addSeries(HistogramSeries, { color: "rgba(148,163,184,0.5)" })
+        .setData(macd.map((d) => ({ time: candles[d.idx]!.date as string, value: d.histogram })));
+      macdPane.addSeries(LineSeries, { color: "#3B82F6", lineWidth: 1 })
+        .setData(macd.map((d) => ({ time: candles[d.idx]!.date as string, value: d.macd })));
+      macdPane.addSeries(LineSeries, { color: "#F59E0B", lineWidth: 1 })
+        .setData(macd.map((d) => ({ time: candles[d.idx]!.date as string, value: d.signal })));
+    }
+
+    // RSI pane
     const rsiPane = chart.addPane({ height: 90 });
     const rsi = calcRSI(candles, 14);
     if (rsi.length > 0) {
@@ -220,9 +186,19 @@ export default function TerminalPage() {
       rsiPane.addSeries(LineSeries, { color: "rgba(0,192,135,0.3)", lineWidth: 1, lineStyle: 2, lastValueVisible: false })
         .setData(rsi.map((d) => ({ time: candles[d.idx]!.date as string, value: 30 })));
     }
-    rsiPane.priceScale().applyOptions({ autoScale: false, topMargin: 0, bottomMargin: 0 });
+
+    const ro = new ResizeObserver(() => {
+      if (container.clientWidth > 0) chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+    });
+    ro.observe(container);
+    (container as Record<string, unknown>)._ro = ro;
 
     chart.timeScale().fitContent();
+    return () => {
+      ro.disconnect();
+      chart.remove();
+      chartApiRef.current = null;
+    };
   }, [candles]);
 
   return (
