@@ -156,7 +156,6 @@ async function persistAnalysis(p: PersistParams): Promise<string> {
 
   return analysisId ?? "local";
 }
-}
 
 async function logFailedAttempt(
   request: AIAnalysisRequest,
