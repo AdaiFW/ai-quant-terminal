@@ -55,16 +55,44 @@ export const TICKER_MAP: Record<string, string> = {
 };
 
 const DEFAULT_WATCHLIST = [
-  // US stocks
-  "AAPL", "TSLA", "NVDA", "MSFT", "GOOGL", "AMZN", "META", "NFLX",
-  "AMD", "INTC", "BABA", "PLTR", "CRM", "ADBE", "DIS", "BA",
-  "JPM", "GS", "V", "MA", "WMT", "KO", "PEP", "XOM", "CVX",
-  "PYPL", "UBER", "SNOW", "COIN", "RBLX", "SOFI",
-  // A-shares
-  "600519", "000001", "000858", "600036", "000333", "002415",
-  "601318", "600030", "000002", "300750", "002594", "600900",
-  "688981", "601899", "603259", "000725", "002714", "300059",
-  "600585", "000063", "002475", "601012", "600031", "000651",
+  // ── US: Magnificent 7 + Tech ──
+  "AAPL", "TSLA", "NVDA", "MSFT", "GOOGL", "AMZN", "META",
+  // ── US: Semiconductors ──
+  "AMD", "INTC", "QCOM", "AVGO", "TXN", "MU", "ASML", "AMAT",
+  // ── US: Software & Cloud ──
+  "CRM", "ADBE", "ORCL", "NOW", "SNOW", "PLTR", "CRWD", "DDOG",
+  // ── US: Internet & E-commerce ──
+  "NFLX", "BABA", "JD", "PDD", "SHOP", "UBER", "ABNB",
+  // ── US: AI & Robotics ──
+  "SMCI", "ARM", "RBLX", "COIN", "SOFI", "HOOD",
+  // ── US: Finance ──
+  "JPM", "GS", "MS", "BAC", "C", "WFC", "V", "MA", "AXP",
+  // ── US: Consumer ──
+  "WMT", "KO", "PEP", "MCD", "NKE", "SBUX", "HD", "LOW",
+  // ── US: Energy & Industry ──
+  "XOM", "CVX", "CAT", "GE", "BA", "RTX",
+  // ── US: Healthcare ──
+  "UNH", "JNJ", "PFE", "ABBV", "LLY", "MRK",
+  // ── CN: Baijiu & Food ──
+  "600519", "000858", "000568", "002304", "600809",
+  // ── CN: Banks ──
+  "000001", "600036", "601398", "601939", "601288", "002142",
+  // ── CN: Insurance & Securities ──
+  "601318", "600030", "601688", "601066",
+  // ── CN: EV & Battery ──
+  "002594", "300750", "601127", "600104", "000625",
+  // ── CN: Tech & Chips ──
+  "688981", "002415", "002475", "603501", "300059",
+  // ── CN: Energy & Power ──
+  "600900", "601899", "600585", "601012",
+  // ── CN: Consumer Electronics ──
+  "000333", "000651", "000725", "002714",
+  // ── CN: Property & Infrastructure ──
+  "000002", "600031", "601668", "600048",
+  // ── CN: Pharma & Healthcare ──
+  "603259", "300760", "000538", "600276", "300015",
+  // ── CN: Rare earth & Materials ──
+  "000063", "601600", "600111", "002460",
 ];
 const DEFAULT_TICKERS: TickerItem[] = [
   // US
