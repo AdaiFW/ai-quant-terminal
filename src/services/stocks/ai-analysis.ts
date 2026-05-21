@@ -59,15 +59,17 @@ export async function analyzeStock(
       },
     });
 
-    // 4. Persist (non-blocking — DB is optional)
-    let analysisId = "local";
-    persistAnalysis({
+    // 4. Persist to Supabase
+    const analysisId = await persistAnalysis({
       request,
       result: result.data as Record<string, unknown>,
       tokensInput: result.meta.tokensInput,
       tokensOutput: result.meta.tokensOutput,
       latencyMs: result.meta.latencyMs,
       fallbackUsed: result.meta.fallbackUsed,
+    }).catch((err) => {
+      console.error("Failed to persist analysis:", err);
+      return null;
     });
 
     return {
@@ -79,7 +81,7 @@ export async function analyzeStock(
         tokensOutput: result.meta.tokensOutput,
         latencyMs: result.meta.latencyMs,
         attempts: result.meta.attempts,
-        analysisId,
+        analysisId: analysisId ?? "local",
       },
     };
   } catch (err) {
@@ -144,11 +146,11 @@ async function persistAnalysis(p: PersistParams): Promise<string> {
       durationMs: p.latencyMs,
       retryCount: 0,
     },
-  }).catch(() => null);
+  });
 
-  db.aILog.create({
+  await db.aILog.create({
     data: {
-      analysisId: "local",
+      analysisId: analysis.id,
       userId: "system",
       provider: "DEEPSEEK" as never,
       model: process.env.AI_MODEL || "deepseek-chat",
@@ -161,9 +163,10 @@ async function persistAnalysis(p: PersistParams): Promise<string> {
       cost: 0,
       createdAt: new Date(),
     },
-  }).catch(() => null);
+  });
 
-  return "local";
+  return analysis.id;
+}
 }
 
 async function logFailedAttempt(

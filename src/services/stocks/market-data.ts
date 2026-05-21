@@ -6,6 +6,7 @@ import type { StockQuote, StockQuoteResponse, StockErrorResponse } from "@/types
 import { tickerParamSchema } from "@/types/stock";
 import { withCache } from "@/lib/api/cache";
 import { StockServiceError, InvalidTickerError } from "@/lib/api/errors";
+import { db } from "@/lib/db";
 
 function isCN(t: string): boolean { return /^\d{6}$/.test(t); }
 
@@ -51,7 +52,7 @@ async function fetchQuote(ticker: string): Promise<StockQuote> {
   const change = (d.f169 ?? 0) / 100;
   const changePercent = (d.f170 ?? 0) / 100;
 
-  return {
+  const result: StockQuote = {
     ticker: d.f57 ?? ticker,
     currentPrice: r2(price),
     dailyChange: r2(change),
@@ -67,6 +68,46 @@ async function fetchQuote(ticker: string): Promise<StockQuote> {
     currency: cn ? "CNY" : "USD",
     exchange: getMarketLabel(ticker),
   };
+
+  // Persist to Supabase stock_cache (non-blocking)
+  db.stockCache.upsert({
+    where: { ticker: result.ticker },
+    create: {
+      ticker: result.ticker,
+      name: d.f58 ?? result.ticker,
+      sector: null,
+      currency: result.currency,
+      exchange: result.exchange,
+      priceData: {
+        price: result.currentPrice,
+        high: result.high,
+        low: result.low,
+        open: result.open,
+        prevClose: result.previousClose,
+        volume: result.volume,
+        change: result.dailyChange,
+        changePercent: result.dailyChangePercent,
+      },
+      lastFetchedAt: new Date(),
+      fetchCount: 1,
+    },
+    update: {
+      priceData: {
+        price: result.currentPrice,
+        high: result.high,
+        low: result.low,
+        open: result.open,
+        prevClose: result.previousClose,
+        volume: result.volume,
+        change: result.dailyChange,
+        changePercent: result.dailyChangePercent,
+      },
+      lastFetchedAt: new Date(),
+      fetchCount: { increment: 1 },
+    },
+  }).catch(() => { /* non-blocking */ });
+
+  return result;
 }
 
 function r2(n: number): number { return Math.round(n * 100) / 100; }
