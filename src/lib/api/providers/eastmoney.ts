@@ -97,7 +97,7 @@ export async function fetchKline(
     `?secid=${secid}` +
     `&fields1=f1,f2,f3,f4,f5,f6` +
     `&fields2=f51,f52,f53,f54,f55,f56,f57` +
-    `&klt=101&fqt=1&beg=${start}&end=${end}`;
+    `&klt=101&fqt=0&beg=${start}&end=${end}`;
 
   const raw = await fetchWithRetry<EMKlineRaw>(url);
   const klines = raw.data?.klines;
@@ -107,10 +107,10 @@ export async function fetchKline(
     const parts = line.split(",");
     return {
       date: parts[0]!,
-      open: Number(parts[1]) / 100,
-      high: Number(parts[3]) / 100,
-      low: Number(parts[4]) / 100,
-      close: Number(parts[2]) / 100,
+      open: Math.round(Number(parts[1]) * 100) / 100,
+      high: Math.round(Number(parts[3]) * 100) / 100,
+      low: Math.round(Number(parts[4]) * 100) / 100,
+      close: Math.round(Number(parts[2]) * 100) / 100,
       volume: Number(parts[5]) * 100, // 手 → 股
     };
   });
